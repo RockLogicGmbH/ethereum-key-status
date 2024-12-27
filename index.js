@@ -7,6 +7,11 @@ const CHUNK_SIZE=parseInt(process.env.CHUNK_SIZE) || 500;
 const NODE_ENDPOINT=process.env.NODE_ENDPOINT || '127.0.0.1:5052,127.0.0.1:3500,127.0.0.1:5051';
 const KEY_JSON_PATH=process.env.KEY_JSON_PATH || 'keys.json';
 
+const RESET = '\x1b[0m';
+const RED   = '\x1b[31m';
+const GREEN = '\x1b[32m';
+const YELLOW = '\x1b[33m';
+
 async function checkFullnodes() {
     const fullnodes = NODE_ENDPOINT.split(',');
     const availableNodes = [];
@@ -16,7 +21,7 @@ async function checkFullnodes() {
         try {
             const response = await fetch(url);
             const json = await response.json();
-            logger.info('Fullnode ' + node + ' is ' + (json.data.is_syncing ? 'syncing' : 'not syncing') + ` (${json.data.sync_distance})`);
+            logger.info('Fullnode ' + node + ' is ' + (json.data.is_syncing ? `${RED}syncing${RESET}` : `${GREEN}not syncing${RESET}`) + ` (${json.data.sync_distance})`);
             if (!json.data.is_syncing) 
                 availableNodes.push(node);
         } catch (error) {
@@ -122,14 +127,14 @@ async function main() {
     const status = getStatus(validatorStats);
     logger.info('Status: ' + JSON.stringify(status));
 
-    logger.info('Finished Checking Keys');
-    logger.info('Total Validators checked: ' + validatorStats.length);
+    logger.info(GREEN + 'Finished Checking Keys' + RESET);
+    logger.info('Total Validators checked: ' + YELLOW + validatorStats.length + RESET);
     if(status.active_ongoing)
-        logger.info('Active Validators: ' + status.active_ongoing);
+        logger.info('Active Validators: ' + YELLOW + status.active_ongoing + RESET);
     if(status.withdrawal_done)
-        logger.info('Withdrawal Done: ' + status.withdrawal_done);
+        logger.info('Withdrawal Done: ' + YELLOW + status.withdrawal_done + RESET);
     if(status.withdrawal_possible)
-        logger.info('Withdrawal Possible: ' + status.withdrawal_possible);
+        logger.info('Withdrawal Possible: ' + YELLOW + status.withdrawal_possible + RESET);
     await writeResults(status);
 }
 
