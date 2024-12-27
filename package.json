@@ -1,0 +1,16 @@
+{
+  "name": "keystatus",
+  "version": "1.0.0",
+  "description": "Checks the Status of given Keys",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "check": "node index.js"
+  },
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "winston": "^3.17.0"
+  }
+}
