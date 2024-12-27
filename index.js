@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 
 const CHUNK_SIZE=parseInt(process.env.CHUNK_SIZE) || 500;
-const NODE_ENDPOINT=process.env.NODE_ENDPOINT || '127.0.0.1:5052';
+const NODE_ENDPOINT=process.env.NODE_ENDPOINT || '127.0.0.1:5052,127.0.0.1:3500,127.0.0.1:5051';
 const KEY_JSON_PATH=process.env.KEY_JSON_PATH || 'keys.json';
 
 async function checkFullnodes() {
