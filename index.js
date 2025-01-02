@@ -6,11 +6,76 @@ const path = require('path');
 const CHUNK_SIZE=parseInt(process.env.CHUNK_SIZE) || 500;
 const NODE_ENDPOINT=process.env.NODE_ENDPOINT || '127.0.0.1:5052,127.0.0.1:3500,127.0.0.1:5051';
 const KEY_JSON_PATH=process.env.KEY_JSON_PATH || 'keys.json';
+const WEBHOOK_URL=process.env.WEBHOOK_URL || '';
 
 const RESET = '\x1b[0m';
 const RED   = '\x1b[31m';
 const GREEN = '\x1b[32m';
 const YELLOW = '\x1b[33m';
+
+function getAdaptiveCard(data){
+    let facts = []
+    Object.entries(data).forEach(([key, value]) => {
+        facts.push({
+            "title": key,
+            "value": value
+        });
+      });
+    return {
+        "type": "message",
+        "attachments": [{
+            "contentType": "application/vnd.microsoft.card.adaptive",
+            "content": {
+                "type": "AdaptiveCard",
+                "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                "version": "1.6",
+                "body": [
+                    {
+                        "type": "TextBlock",
+                        "text": "Lido Key Status",
+                        "wrap": true,
+                        "color": "Accent",
+                        "isSubtle": false,
+                        "weight": "Bolder",
+                        "size": "Large"
+                    },
+                    {
+                        "type": "FactSet",
+                        "facts": facts
+                    }
+                ],
+            },
+        }]
+    }
+}
+
+async function callWebhook(data) {
+    const url = WEBHOOK_URL;
+    if(!url){
+        logger.error('No Webhook URL');
+        return;
+    }
+
+    const options = {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(getAdaptiveCard(data))
+    };
+    try {
+        const response = await fetch(url, options);
+        if(response.ok){
+            const json = await response.json();
+            logger.info('Webhook Response: ' + JSON.stringify(json, null, 2));
+        }else{
+            logger.error('Error calling webhook: ' + await response.text());
+        }
+    } catch (error) {
+        logger.error('Error calling webhook: ' + error);
+    }
+
+}
 
 async function checkFullnodes() {
     const fullnodes = NODE_ENDPOINT.split(',');
@@ -136,6 +201,7 @@ async function main() {
     if(status.withdrawal_possible)
         logger.info('Withdrawal Possible: ' + YELLOW + status.withdrawal_possible + RESET);
     await writeResults(status);
+    await callWebhook(status);
 }
 
 
