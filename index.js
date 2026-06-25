@@ -16,9 +16,11 @@ const YELLOW = '\x1b[33m';
 function getAdaptiveCard(data){
     let facts = []
     Object.entries(data).forEach(([key, value]) => {
+        // Adaptive Card FactSet requires title/value to be strings; numeric
+        // values (e.g. validator counts) otherwise fail to render in Teams.
         facts.push({
-            "title": key,
-            "value": value
+            "title": String(key),
+            "value": String(value)
         });
       });
     return {
@@ -28,7 +30,7 @@ function getAdaptiveCard(data){
             "content": {
                 "type": "AdaptiveCard",
                 "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-                "version": "1.6",
+                "version": "1.5",
                 "body": [
                     {
                         "type": "TextBlock",
@@ -53,7 +55,7 @@ async function callWebhook(data) {
     const url = WEBHOOK_URL;
     if(!url){
         logger.error('No Webhook URL');
-        return;
+        return false;
     }
 
     const options = {
@@ -66,13 +68,17 @@ async function callWebhook(data) {
     try {
         const response = await fetch(url, options);
         if(response.ok){
-            const json = await response.json();
-            logger.info('Webhook Response: ' + JSON.stringify(json, null, 2));
+            // Teams Workflows (Power Automate) reply with 202 Accepted and an
+            // empty body, so there is nothing to parse here.
+            logger.info('Webhook delivered (HTTP ' + response.status + ')');
+            return true;
         }else{
             logger.error('Error calling webhook: ' + await response.text());
+            return false;
         }
     } catch (error) {
         logger.error('Error calling webhook: ' + error);
+        return false;
     }
 
 }
@@ -205,4 +211,8 @@ async function main() {
 }
 
 
-main()
+if (require.main === module) {
+    main();
+}
+
+module.exports = { main, callWebhook, getAdaptiveCard };
