@@ -8,6 +8,8 @@ const { IN_DEPOSIT_QUEUE, NOT_DEPOSITED, UNKNOWN } = require('./status');
 // render before they hit any byte limit.
 const DEFAULT_MAX_CARD_BYTES = 16000;
 const DEFAULT_MAX_FACTS_PER_CARD = 100;
+// Keys shown either side of a frontier.
+const DEFAULT_FRONTIER_WINDOW = 2;
 const COMPOUNDING_CREDENTIALS = '0x02';
 
 function formatEth(eth) {
@@ -25,18 +27,18 @@ function formatDuration(seconds) {
     return `${Math.round(seconds / 86400)} d`;
 }
 
-function keyFact(key, type) {
-    const title = shortPubkey(key.pubkey);
+function keyLabel(key, marked) {
+    const index = key.genIndex !== undefined ? key.genIndex : key.position;
+    return `${marked ? '▸ ' : ''}#${index} ${shortPubkey(key.pubkey)}`;
+}
+
+function keyValue(key, type) {
     if (key.state === IN_DEPOSIT_QUEUE) {
-        const eta = formatDuration(key.queue.estimatedWaitSeconds);
-        return { title, value: `${formatEth(key.balanceEth)} · in queue #${key.queue.position} · ~${eta}` };
+        return `${formatEth(key.balanceEth)} · in queue #${key.queue.position} · ~${formatDuration(key.queue.estimatedWaitSeconds)}`;
     }
-    if (key.state === NOT_DEPOSITED) {
-        return { title, value: 'not deposited' };
-    }
-    if (key.state === UNKNOWN) {
-        return { title, value: 'no validator record' };
-    }
+    if (key.state === NOT_DEPOSITED) return 'not deposited';
+    if (key.state === UNKNOWN) return 'no validator record';
+
     let value = `${formatEth(key.balanceEth)} · ${key.state}`;
     if (key.pendingTopUpEth) {
         value += ` · +${formatEth(key.pendingTopUpEth)} queued`;
@@ -46,7 +48,11 @@ function keyFact(key, type) {
     if (type === 'cmv2' && key.credentials && key.credentials !== COMPOUNDING_CREDENTIALS) {
         value += ` · ⚠ ${key.credentials}`;
     }
-    return { title, value };
+    return value;
+}
+
+function keyFact(key, type, marked = false) {
+    return { title: keyLabel(key, marked), value: keyValue(key, type) };
 }
 
 function summaryFacts(report) {
@@ -81,7 +87,50 @@ function summaryFacts(report) {
     return facts;
 }
 
-function makeMessage(title, facts, keyFacts) {
+// A handful of keys either side of a boundary, with the boundary key marked.
+function windowFacts(report, from, to, marked) {
+    const facts = [];
+    for (let i = Math.max(0, from); i <= Math.min(report.keys.length - 1, to); i++) {
+        facts.push(keyFact(report.keys[i], report.type, i === marked));
+    }
+    return facts;
+}
+
+// The two windows that say where things currently stand: how far down the key
+// list deposits have reached, and which key the next top-up fills.
+function frontierSections(report, window) {
+    const { lastDeposited, firstUndeposited, firstBelowCap, maxBalanceEth, hasActiveKeys } = report.frontiers;
+    const sections = [];
+
+    if (lastDeposited >= 0 && firstUndeposited >= 0) {
+        sections.push({
+            header: 'Deposit frontier — last key on chain → first not deposited',
+            facts: windowFacts(report, lastDeposited - window + 1, firstUndeposited + window - 1, lastDeposited)
+        });
+    } else if (lastDeposited < 0) {
+        sections.push({ header: 'Deposit frontier', facts: [{ title: 'No key deposited yet', value: `0 of ${report.totals.keys}` }] });
+    } else {
+        sections.push({ header: 'Deposit frontier', facts: [{ title: 'All keys deposited', value: `${report.totals.keys} of ${report.totals.keys}` }] });
+    }
+
+    if (firstBelowCap >= 0) {
+        sections.push({
+            header: `Fill frontier — first key below ${maxBalanceEth} ETH`,
+            facts: windowFacts(report, firstBelowCap - window + 1, firstBelowCap + window, firstBelowCap)
+        });
+    } else {
+        sections.push({
+            header: `Fill frontier — first key below ${maxBalanceEth} ETH`,
+            facts: [hasActiveKeys
+                ? { title: 'None', value: `every active key is at the ${maxBalanceEth} ETH cap` }
+                : { title: 'None', value: 'no key is active yet' }]
+        });
+    }
+
+    return sections;
+}
+
+function makeMessage(title, sections) {
     const body = [{
         type: 'TextBlock',
         text: title,
@@ -91,14 +140,12 @@ function makeMessage(title, facts, keyFacts) {
         weight: 'Bolder',
         size: 'Large'
     }];
-    if (facts && facts.length) {
-        body.push({ type: 'FactSet', facts });
-    }
-    if (keyFacts && keyFacts.length) {
-        if (facts && facts.length) {
-            body.push({ type: 'TextBlock', text: 'Per-key balances', wrap: true, weight: 'Bolder', spacing: 'Medium' });
+    for (const section of sections) {
+        if (!section || !section.facts || section.facts.length === 0) continue;
+        if (section.header) {
+            body.push({ type: 'TextBlock', text: section.header, wrap: true, weight: 'Bolder', spacing: 'Medium' });
         }
-        body.push({ type: 'FactSet', facts: keyFacts });
+        body.push({ type: 'FactSet', facts: section.facts });
     }
     return {
         type: 'message',
@@ -121,17 +168,17 @@ function getAdaptiveCard(data, title = 'Lido Key Status') {
         title: String(key),
         value: String(value)
     }));
-    return makeMessage(title, facts);
+    return makeMessage(title, [{ facts }]);
 }
 
 // Largest number of rows that still fits the budget, found by bisection so
 // a single oversized row cannot wedge the loop.
-function fittingRowCount(title, summary, facts, maxBytes, maxFacts) {
+function fittingRowCount(title, facts, maxBytes, maxFacts) {
     let low = 1;
     let high = Math.min(facts.length, maxFacts);
     while (low < high) {
         const mid = Math.ceil((low + high) / 2);
-        if (JSON.stringify(makeMessage(title, summary, facts.slice(0, mid))).length <= maxBytes) {
+        if (JSON.stringify(makeMessage(title, [{ facts: facts.slice(0, mid) }])).length <= maxBytes) {
             low = mid;
         } else {
             high = mid - 1;
@@ -140,38 +187,43 @@ function fittingRowCount(title, summary, facts, maxBytes, maxFacts) {
     return low;
 }
 
-// Returns the list of Teams messages for one key set: a single card for the
-// aggregate view, or a summary card followed by as many per-key cards as the
-// size budget requires.
-//
-// When the rows do not fit one card the summary gets a card of its own. It
-// carries the numbers that matter most, so it must never be the card that
-// grows large enough to be dropped, and the rows are then spread evenly
-// rather than packing the first card to the limit.
-function buildCards(report, maxBytes = DEFAULT_MAX_CARD_BYTES, maxFacts = DEFAULT_MAX_FACTS_PER_CARD) {
-    const summary = summaryFacts(report);
+// Listing every key is unreadable at 500 keys, so a cmv2 set reports the
+// summary plus the two frontier windows. The full per-key listing is still
+// available by setting "perKeyCard": true on the key set; it is then spread
+// evenly over as many cards as the size budget allows, with the summary on a
+// card of its own so it cannot be the one that grows large enough to drop.
+function buildCards(report, options = {}) {
+    const maxBytes = options.maxBytes || DEFAULT_MAX_CARD_BYTES;
+    const maxFacts = options.maxFacts || DEFAULT_MAX_FACTS_PER_CARD;
+    const window = options.frontierWindow || DEFAULT_FRONTIER_WINDOW;
+
+    const sections = [{ facts: summaryFacts(report) }];
+    if (report.type === 'cmv2' && report.frontiers) {
+        sections.push(...frontierSections(report, window));
+    }
+
     if (!report.perKeyCard) {
-        return [makeMessage(report.name, summary)];
+        return [makeMessage(report.name, sections)];
     }
 
     const facts = report.keys.map(key => keyFact(key, report.type));
-    const single = makeMessage(report.name, summary, facts);
+    const single = makeMessage(report.name, sections.concat([{ header: 'Per-key balances', facts }]));
     if (facts.length <= maxFacts && JSON.stringify(single).length <= maxBytes) {
         return [single];
     }
 
     // Measured against a worst-case title so the real titles always fit.
     const probeTitle = `${report.name} — keys (99/99)`;
-    const perCard = fittingRowCount(probeTitle, null, facts, maxBytes, maxFacts);
+    const perCard = fittingRowCount(probeTitle, facts, maxBytes, maxFacts);
     const cardCount = Math.ceil(facts.length / perCard);
     const evenRows = Math.ceil(facts.length / cardCount);
 
-    const cards = [makeMessage(report.name, summary)];
+    const cards = [makeMessage(report.name, sections)];
     for (let i = 0; i < cardCount; i++) {
         const slice = facts.slice(i * evenRows, (i + 1) * evenRows);
         if (slice.length === 0) break;
         const title = cardCount > 1 ? `${report.name} — keys (${i + 1}/${cardCount})` : `${report.name} — keys`;
-        cards.push(makeMessage(title, null, slice));
+        cards.push(makeMessage(title, [{ facts: slice }]));
     }
     return cards;
 }
@@ -181,9 +233,11 @@ module.exports = {
     getAdaptiveCard,
     keyFact,
     summaryFacts,
+    frontierSections,
     formatEth,
     formatDuration,
     shortPubkey,
     DEFAULT_MAX_CARD_BYTES,
-    DEFAULT_MAX_FACTS_PER_CARD
+    DEFAULT_MAX_FACTS_PER_CARD,
+    DEFAULT_FRONTIER_WINDOW
 };

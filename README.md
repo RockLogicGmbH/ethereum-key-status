@@ -27,7 +27,8 @@ On each run (`index.js`):
    deposit queue (`/eth/v1/beacon/states/head/pending_deposits`) — see
    [The deposit queue](#the-deposit-queue).
 5. **Aggregates the results** into counts per state, plus balance statistics
-   for `0x02` keys and a per-batch breakdown for CMv1 sets.
+   and the [frontiers](#frontiers) for `0x02` keys, and a per-batch breakdown
+   for CMv1 sets.
 6. **Writes a timestamped report** per key set to
    `results/results-<key-set>-<timestamp>.json`.
 7. **Posts a summary** as an Adaptive Card to a Microsoft Teams webhook
@@ -67,6 +68,8 @@ cp .env.example .env
 | `DEPOSIT_CHURN_ETH_PER_EPOCH` | `256`                                          | Per-epoch deposit churn used to estimate queue wait time. Mainnet caps this at 256 ETH.                          |
 | `MAX_CARD_BYTES`              | `16000`                                        | Size budget per Teams card. Per-key rows are split across several posts when they would exceed it.               |
 | `MAX_FACTS_PER_CARD`          | `100`                                          | Maximum per-key rows on one card. Long FactSets fail to render before they hit any byte limit.                   |
+| `FRONTIER_WINDOW`             | `2`                                            | Keys shown either side of a frontier on a CMv2 card.                                                             |
+| `CMV2_MAX_BALANCE_ETH`        | `2048`                                         | EIP-7251 compounding cap a `0x02` key fills up to. Defines the fill frontier.                                    |
 | `WEBHOOK_DELAY_MS`            | `500`                                          | Pause between posts when one key set needs more than one card.                                                   |
 
 ### Key sets
@@ -97,13 +100,14 @@ them in `keysets.json` (see `keysets.example.json`):
 | `keyFile`    | **yes**  | Path to this set's key JSON file.                                                             |
 | `chunkSize`  | no       | Keys per request for the `GET` fallback. Default `500`.                                       |
 | `webhookUrl` | no       | Post this set to a different channel than `WEBHOOK_URL`.                                      |
+| `perKeyCard` | no       | `true` lists every key on the card. Off by default — at 500 keys it is unreadable and needs several posts. |
 
 `type` selects the reporting style:
 
-| Type   | Credentials     | Card                                                        | Batches |
-| ------ | --------------- | ----------------------------------------------------------- | ------- |
-| `cmv1` | `0x01`, 32 ETH  | Aggregate counts only.                                       | Yes — per-`chunkSize` breakdown of active validators. |
-| `cmv2` | `0x02`, ≤2048 ETH | Summary plus **one row per key** with its balance and state. | No — a CMv2 set is capped at 500 keys on a single Obol DVT cluster, so there is nothing to split. |
+| Type   | Credentials       | Card                                                           | Batches |
+| ------ | ----------------- | -------------------------------------------------------------- | ------- |
+| `cmv1` | `0x01`, 32 ETH    | Aggregate counts only.                                          | Yes — per-`chunkSize` breakdown of active validators. |
+| `cmv2` | `0x02`, ≤2048 ETH | Aggregate counts, balance statistics and the two [frontiers](#frontiers). | No — a CMv2 set is capped at 500 keys on a single Obol DVT cluster, so there is nothing to split. |
 
 If `keysets.json` is absent the tool falls back to a single CMv1 set built
 from `KEY_JSON_PATH` and `CHUNK_SIZE`, so an existing `.env` keeps working
@@ -122,6 +126,20 @@ Each `keyFile` must point to a JSON array of objects, each with at least a
   }
 ]
 ```
+
+## Frontiers
+
+Listing all 500 keys says very little, so a CMv2 card reports two boundaries
+instead, each with a small window of keys either side (`FRONTIER_WINDOW`):
+
+- **Deposit frontier** — the last key that made it onto the chain (active or
+  still queued) and the first one behind it that has not been deposited at
+  all. This is how far down the key list deposits have reached.
+- **Fill frontier** — the first key still below the `CMV2_MAX_BALANCE_ETH`
+  (2048 ETH) compounding cap, which is where the next top-up lands.
+
+Both are also written to the log and to the JSON report (`frontiers`), as
+positions in the key file.
 
 ## The deposit queue
 
@@ -182,18 +200,35 @@ The card uses Adaptive Card schema **1.5** (the maximum the Teams client
 currently renders) and stringifies all values, since Teams `FactSet` fields
 must be strings.
 
-A CMv2 card lists one row per key, e.g.:
+A CMv2 card carries the summary plus the two frontier windows:
 
 ```
-0xaf59776a…33ebf3    2048.00 ETH · active_ongoing
-0xb1c2d3e4…009988    1056.42 ETH · active_ongoing · +256.00 ETH queued
-0xc2d3e4f5…998877      32.00 ETH · active_ongoing · ⚠ 0x01
-0xd3e4f5a6…887766      32.00 ETH · in queue #48213 · ~40 d
-0xe4f5a697…776655    not deposited
+Lido CSM v2 (Obol DVT)
+  Keys                    500
+  Active (incl. queue)    127
+  active_ongoing            6
+  in_deposit_queue        121
+  not_deposited           373
+  Total balance       4064.01 ETH
+  Avg / min / max       32.00 / 32.00 / 32.01 ETH
+
+  Deposit frontier — last key on chain → first not deposited
+    #125 0xcccccccc…cf1ac0    32.00 ETH · in queue #55119 · ~31 d
+  ▸ #126 0xcccccccc…cf39af    32.00 ETH · in queue #55120 · ~31 d
+    #127 0xcccccccc…cf589e    not deposited
+    #128 0xcccccccc…cf778d    not deposited
+
+  Fill frontier — first key below 2048 ETH
+  ▸ #0 0xcccccccc…cccccd      32.00 ETH · active_ongoing
+    #1 0xcccccccc…cc1efc      32.00 ETH · active_ongoing
+    #2 0xcccccccc…cc3deb      32.01 ETH · active_ongoing
 ```
 
-A `⚠` marks a CMv2 key whose withdrawal credentials are not `0x02` — it
-cannot accumulate past 32 ETH.
+`▸` marks the frontier key itself, and `⚠` marks a CMv2 key whose withdrawal
+credentials are not `0x02` — it cannot accumulate past 32 ETH.
+
+Setting `"perKeyCard": true` on a key set restores the full listing, one row
+per key, spread over as many cards as the size budget allows.
 
 Teams Workflows answers `202 Accepted` as soon as it receives the POST —
 *before* it tries to render the card. An oversized payload is therefore

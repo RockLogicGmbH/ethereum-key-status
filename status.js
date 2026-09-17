@@ -56,6 +56,44 @@ function buildKeyReport(key, validator, queued, options) {
     return report;
 }
 
+// The two boundaries worth watching on a cmv2 set, both expressed as
+// positions in the key file:
+//
+//  - the deposit frontier: the last key that made it onto the chain (active
+//    or still queued) and the first one behind it that has not been
+//    deposited at all, i.e. how far down the key list deposits have reached;
+//  - the fill frontier: the first key still below the 2048 ETH compounding
+//    cap, i.e. where the next top-up lands.
+function computeFrontiers(keys, maxBalanceEth) {
+    const isOnChain = key => key.state !== NOT_DEPOSITED && key.state !== UNKNOWN;
+
+    let lastDeposited = -1;
+    for (let i = keys.length - 1; i >= 0; i--) {
+        if (isOnChain(keys[i])) {
+            lastDeposited = i;
+            break;
+        }
+    }
+    const firstUndeposited = lastDeposited + 1 < keys.length ? lastDeposited + 1 : -1;
+
+    let firstBelowCap = -1;
+    for (let i = 0; i < keys.length; i++) {
+        // Only keys with a validator record can take a top-up.
+        if (keys[i].validatorIndex !== undefined && keys[i].balanceEth < maxBalanceEth) {
+            firstBelowCap = i;
+            break;
+        }
+    }
+
+    return {
+        lastDeposited,
+        firstUndeposited,
+        firstBelowCap,
+        maxBalanceEth,
+        hasActiveKeys: keys.some(key => key.validatorIndex !== undefined)
+    };
+}
+
 function buildReport(keySet, keys, validators, queue, options) {
     const churnEthPerEpoch = options.churnEthPerEpoch;
     const queueKnown = queue !== null;
@@ -63,6 +101,7 @@ function buildReport(keySet, keys, validators, queue, options) {
         const validator = validators.get(key.pubkey);
         const queued = queueKnown ? queue.byPubkey.get(key.pubkey) : undefined;
         const report = buildKeyReport(key, validator, queued, { churnEthPerEpoch, queueKnown });
+        report.position = i;
         if (keySet.reportBatches) {
             const start = Math.floor(i / keySet.chunkSize) * keySet.chunkSize;
             report.batch = `${start}-${start + keySet.chunkSize}`;
@@ -124,9 +163,10 @@ function buildReport(keySet, keys, validators, queue, options) {
         },
         stateCounts,
         credentials,
+        frontiers: computeFrontiers(keyReports, options.maxBalanceEth),
         batches: keySet.reportBatches ? batches : undefined,
         keys: keyReports
     };
 }
 
-module.exports = { buildReport, isActiveState, IN_DEPOSIT_QUEUE, NOT_DEPOSITED, UNKNOWN };
+module.exports = { buildReport, computeFrontiers, isActiveState, IN_DEPOSIT_QUEUE, NOT_DEPOSITED, UNKNOWN };

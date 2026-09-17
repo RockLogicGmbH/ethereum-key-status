@@ -13,9 +13,13 @@ const TYPES = ['cmv1', 'cmv2'];
 // cmv2 keys live on a single Obol DVT cluster and are capped at 500, so the
 // whole set goes out in one request; chunking only ever applies to the GET
 // fallback. cmv1 keeps the per-batch breakdown it has always reported.
+//
+// Neither type lists every key by default — at 500 keys that is unreadable
+// and does not fit a Teams card. Set "perKeyCard": true on a set to get the
+// full listing anyway.
 const TYPE_DEFAULTS = {
     cmv1: { chunkSize: 500, reportBatches: true, perKeyCard: false },
-    cmv2: { chunkSize: 500, reportBatches: false, perKeyCard: true }
+    cmv2: { chunkSize: 500, reportBatches: false, perKeyCard: false }
 };
 
 function slugify(name) {
