@@ -2,217 +2,212 @@ require('dotenv').config();
 const logger = require('./logger');
 const fs = require('fs');
 const path = require('path');
+const { loadKeySets } = require('./keysets');
+const { normalizePubkey, checkFullnodes, fetchValidators, fetchDepositQueue } = require('./beacon');
+const { buildReport } = require('./status');
+const { buildCards, getAdaptiveCard, DEFAULT_MAX_CARD_BYTES } = require('./cards');
 
-const CHUNK_SIZE=parseInt(process.env.CHUNK_SIZE) || 500;
-const NODE_ENDPOINT=process.env.NODE_ENDPOINT || '127.0.0.1:5052,127.0.0.1:3500,127.0.0.1:5051';
-const KEY_JSON_PATH=process.env.KEY_JSON_PATH || 'keys.json';
-const WEBHOOK_URL=process.env.WEBHOOK_URL || '';
+const NODE_ENDPOINT = process.env.NODE_ENDPOINT || '127.0.0.1:5052,127.0.0.1:3500,127.0.0.1:5051';
+const WEBHOOK_URL = process.env.WEBHOOK_URL || '';
+// Mainnet caps the per-epoch deposit churn at 256 ETH, which is what the
+// queue wait estimate is based on.
+const CHURN_ETH_PER_EPOCH = parseFloat(process.env.DEPOSIT_CHURN_ETH_PER_EPOCH) || 256;
+const MAX_CARD_BYTES = parseInt(process.env.MAX_CARD_BYTES, 10) || DEFAULT_MAX_CARD_BYTES;
+const WEBHOOK_DELAY_MS = parseInt(process.env.WEBHOOK_DELAY_MS, 10) || 500;
 
 const RESET = '\x1b[0m';
 const RED   = '\x1b[31m';
 const GREEN = '\x1b[32m';
 const YELLOW = '\x1b[33m';
 
-function getAdaptiveCard(data){
-    let facts = []
-    Object.entries(data).forEach(([key, value]) => {
-        // Adaptive Card FactSet requires title/value to be strings; numeric
-        // values (e.g. validator counts) otherwise fail to render in Teams.
-        facts.push({
-            "title": String(key),
-            "value": String(value)
-        });
-      });
-    return {
-        "type": "message",
-        "attachments": [{
-            "contentType": "application/vnd.microsoft.card.adaptive",
-            "content": {
-                "type": "AdaptiveCard",
-                "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-                "version": "1.5",
-                "body": [
-                    {
-                        "type": "TextBlock",
-                        "text": "Lido Key Status",
-                        "wrap": true,
-                        "color": "Accent",
-                        "isSubtle": false,
-                        "weight": "Bolder",
-                        "size": "Large"
-                    },
-                    {
-                        "type": "FactSet",
-                        "facts": facts
-                    }
-                ],
-            },
-        }]
-    }
-}
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-async function callWebhook(data) {
-    const url = WEBHOOK_URL;
-    if(!url){
+async function postCard(message, url = WEBHOOK_URL) {
+    if (!url) {
         logger.error('No Webhook URL');
         return false;
     }
-
     const options = {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(getAdaptiveCard(data))
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(message)
     };
     try {
         const response = await fetch(url, options);
-        if(response.ok){
+        if (response.ok) {
             // Teams Workflows (Power Automate) reply with 202 Accepted and an
             // empty body, so there is nothing to parse here.
             logger.info('Webhook delivered (HTTP ' + response.status + ')');
             return true;
-        }else{
-            logger.error('Error calling webhook: ' + await response.text());
-            return false;
         }
+        logger.error('Error calling webhook: ' + await response.text());
+        return false;
     } catch (error) {
         logger.error('Error calling webhook: ' + error);
         return false;
     }
-
 }
 
-async function checkFullnodes() {
-    const fullnodes = NODE_ENDPOINT.split(',');
-    const availableNodes = [];
-    for (let i = 0; i < fullnodes.length; i++) {
-        const node = fullnodes[i];
-        const url = `http://${node}/eth/v1/node/syncing`;
-        try {
-            const response = await fetch(url);
-            const json = await response.json();
-            logger.info('Fullnode ' + node + ' is ' + (json.data.is_syncing ? `${RED}syncing${RESET}` : `${GREEN}not syncing${RESET}`) + ` (${json.data.sync_distance})`);
-            if (!json.data.is_syncing) 
-                availableNodes.push(node);
-        } catch (error) {
-            logger.error('Error connecting to Fullnode ' + node);
-        }
-    }
-    if(availableNodes.length === 0){
-        logger.error('No available Fullnodes');
-        process.exit(1);
-    }
-    return availableNodes;
+// Kept for callers that have a flat status object rather than a report.
+async function callWebhook(data, url = WEBHOOK_URL, title) {
+    return postCard(getAdaptiveCard(data, title), url);
 }
 
 function getTimestamp() {
-    const dateString = new Date()
+    return new Date()
         .toISOString()            // e.g., "2024-12-27T14:35:10.123Z"
         .replace(/:/g, '-')       // replace colons with dashes
         .replace('T', '_')        // optional, replace the 'T' with an underscore
         .replace(/\.\d{3}Z$/, ''); // remove milliseconds and trailing 'Z'
-    return dateString;
 }
 
-async function writeResults(status) {
-    const data = JSON.stringify(status, null, 2);
-    const writePath = path.join(__dirname, "results",`results-${getTimestamp()}.json`);
+async function writeResults(report) {
+    const data = JSON.stringify(report, null, 2);
+    const writePath = path.join(__dirname, 'results', `results-${report.slug}-${getTimestamp()}.json`);
     try {
-        await fs.promises.mkdir(path.join(__dirname, "results"), { recursive: true });
+        await fs.promises.mkdir(path.join(__dirname, 'results'), { recursive: true });
         await fs.promises.writeFile(writePath, data);
         logger.info('Results written to: ' + writePath);
-
     } catch (error) {
         logger.error('Error writing file: ' + writePath);
     }
 }
 
-function getStatus(validators) {
-    const status = {};
-    validators.forEach((v) => {
-        status[v.status] = status[v.status] ? status[v.status] + 1 : 1;
-        if(v.status === 'active_ongoing')
-            status[v.batch] = status[v.batch] ? status[v.batch] + 1 : 1;
-    })
-    for(let i = 0; i < validators.length; i += CHUNK_SIZE){
-        status[`${i}-${i+CHUNK_SIZE}`] = status[`${i}-${i+CHUNK_SIZE}`] ? status[`${i}-${i+CHUNK_SIZE}`] : 0;
-    }
-    return status;
+async function readJSONFile(file) {
+    const data = await fs.promises.readFile(file, 'utf8');
+    return JSON.parse(data);
 }
 
-async function checkValidator(pubkeys, nodeEndpoint) {
-    let data = [];
-    for (let i = 0; i < pubkeys.length; i += CHUNK_SIZE) {
-        const chunk = pubkeys.slice(i, i + CHUNK_SIZE);
-        const url = `http://${nodeEndpoint}/eth/v1/beacon/states/head/validators?id=${chunk.join()}`;
-        const response = await fetch(url);
-        const json = await response.json();
-        if(json.data && Array.isArray(json.data)){
-            let newData = json.data.map(d => {return {...d, batch: `${i}-${i+CHUNK_SIZE}`}});
-            data = data.concat(newData);
-            logger.info("Finished Batch " + i + " - " + (i + CHUNK_SIZE));
-        }else{
-            logger.error('Response: ' + JSON.stringify(json, null, 2));
-            return [];
+// Walks the available nodes instead of giving up after the first one.
+async function fetchValidatorsFromAny(nodes, pubkeys, chunkSize) {
+    for (const node of nodes) {
+        try {
+            return { validators: await fetchValidators(node, pubkeys, chunkSize), endpoint: node };
+        } catch (error) {
+            logger.error('Error checking keys on ' + node + ': ' + error.message);
         }
     }
-    return data;
-    
+    return null;
 }
 
-async function readJSONFile(path) {
-    try {
-        const data = await fs.promises.readFile(path, 'utf8');
-        return JSON.parse(data);
-    } catch (error) {
-        logger.error('Error reading file: ' + path);
+// The queue is the same for every key set, and can be a large response, so
+// it is fetched at most once per run.
+async function getDepositQueue(nodes, cache) {
+    if (cache.loaded) return cache.queue;
+    cache.loaded = true;
+    for (const node of nodes) {
+        const queue = await fetchDepositQueue(node);
+        if (queue) {
+            cache.queue = queue;
+            return queue;
+        }
+    }
+    cache.queue = null;
+    return null;
+}
+
+function logReport(report) {
+    logger.info(GREEN + `Finished ${report.name}` + RESET);
+    logger.info('Keys checked: ' + YELLOW + report.totals.keys + RESET);
+    logger.info('Active (incl. queue): ' + YELLOW + report.totals.active + RESET);
+    Object.keys(report.stateCounts).sort().forEach((state) => {
+        logger.info('  ' + state + ': ' + YELLOW + report.stateCounts[state] + RESET);
+    });
+    if (report.type === 'cmv2') {
+        logger.info('Total balance: ' + YELLOW + report.totals.balanceTotalEth.toFixed(2) + ' ETH' + RESET
+            + ` (min ${report.totals.balanceMinEth.toFixed(2)} / avg ${report.totals.balanceAvgEth.toFixed(2)} / max ${report.totals.balanceMaxEth.toFixed(2)})`);
+        if (report.totals.pendingTopUpEth > 0) {
+            logger.info('Queued top-ups: ' + YELLOW + report.totals.pendingTopUpEth.toFixed(2) + ' ETH' + RESET);
+        }
     }
 }
 
+async function processKeySet(keySet, nodes, queueCache) {
+    logger.info(`--- ${keySet.name} (${keySet.type}) ---`);
+    logger.info('Reading keys from file: ' + keySet.keyFile);
+
+    let rawKeys;
+    try {
+        rawKeys = await readJSONFile(keySet.keyFile);
+    } catch (error) {
+        logger.error('Error reading file ' + keySet.keyFile + ': ' + error.message);
+        return false;
+    }
+    if (!Array.isArray(rawKeys) || rawKeys.length === 0) {
+        logger.error(keySet.keyFile + ' contained no keys');
+        return false;
+    }
+    const keys = rawKeys.map(key => ({ ...key, pubkey: normalizePubkey(key.pubkey) }));
+
+    logger.info('Checking ' + keys.length + ' keys');
+    const fetched = await fetchValidatorsFromAny(nodes, keys.map(k => k.pubkey), keySet.chunkSize);
+    if (!fetched) {
+        logger.error('No Validator Data for ' + keySet.name);
+        return false;
+    }
+
+    const missing = keys.filter(key => !fetched.validators.has(key.pubkey)).length;
+    // cmv2 keys are 0x02 and may have top-ups waiting in the same queue, so
+    // the queue is always relevant there — not only when keys are missing.
+    let queue = null;
+    if (missing > 0 || keySet.type === 'cmv2') {
+        if (missing > 0) {
+            logger.info(missing + ' key(s) have no validator record — checking the deposit queue');
+        }
+        queue = await getDepositQueue(nodes, queueCache);
+    }
+
+    const report = buildReport(keySet, keys, fetched.validators, queue, {
+        endpoint: fetched.endpoint,
+        churnEthPerEpoch: CHURN_ETH_PER_EPOCH
+    });
+
+    logReport(report);
+    await writeResults(report);
+
+    const cards = buildCards(report, MAX_CARD_BYTES);
+    if (cards.length > 1) {
+        logger.info(`Posting ${cards.length} cards for ${report.name} (per-key rows exceed the Teams payload limit)`);
+    }
+    let delivered = true;
+    for (let i = 0; i < cards.length; i++) {
+        if (i > 0) await sleep(WEBHOOK_DELAY_MS);
+        delivered = await postCard(cards[i], keySet.webhookUrl) && delivered;
+    }
+    return delivered;
+}
 
 async function main() {
     logger.info('Start Checking Keys');
-    logger.info('Reading keys from file: ' + KEY_JSON_PATH);
-    const keys = await readJSONFile(KEY_JSON_PATH);
 
-    logger.info('Check configured Fullnodes')
-    const nodeEndpoints = await checkFullnodes();
-
-    let validatorStats = [];
-    for(const nodeEndpoint of nodeEndpoints){
-        logger.info('Checking ' + keys.length + ' keys on ' + nodeEndpoint);
-        try{
-            validatorStats = await checkValidator(keys.map(k => k.pubkey), nodeEndpoint);
-        }catch(error){
-            logger.error('Error checking keys on ' + nodeEndpoint);
-        }
-        break;
-    }
-    if(validatorStats.length === 0){
-        logger.error('No Validator Data');
+    let keySets;
+    try {
+        keySets = loadKeySets();
+    } catch (error) {
+        logger.error(error.message);
         process.exit(1);
     }
 
-    logger.info('Getting Status of Validators');
-    const status = getStatus(validatorStats);
-    logger.info('Status: ' + JSON.stringify(status));
+    logger.info('Check configured Fullnodes');
+    const nodes = await checkFullnodes(NODE_ENDPOINT.split(','), { RESET, RED, GREEN });
+    if (nodes.length === 0) {
+        logger.error('No available Fullnodes');
+        process.exit(1);
+    }
 
-    logger.info(GREEN + 'Finished Checking Keys' + RESET);
-    logger.info('Total Validators checked: ' + YELLOW + validatorStats.length + RESET);
-    if(status.active_ongoing)
-        logger.info('Active Validators: ' + YELLOW + status.active_ongoing + RESET);
-    if(status.withdrawal_done)
-        logger.info('Withdrawal Done: ' + YELLOW + status.withdrawal_done + RESET);
-    if(status.withdrawal_possible)
-        logger.info('Withdrawal Possible: ' + YELLOW + status.withdrawal_possible + RESET);
-    await writeResults(status);
-    await callWebhook(status);
+    const queueCache = { loaded: false, queue: null };
+    let allOk = true;
+    for (const keySet of keySets) {
+        const ok = await processKeySet(keySet, nodes, queueCache);
+        allOk = ok && allOk;
+    }
+
+    logger.info(allOk ? GREEN + 'Finished Checking Keys' + RESET : RED + 'Finished with errors' + RESET);
+    if (!allOk) process.exit(1);
 }
-
 
 if (require.main === module) {
     main();
 }
 
-module.exports = { main, callWebhook, getAdaptiveCard };
+module.exports = { main, callWebhook, postCard, getAdaptiveCard, processKeySet };
