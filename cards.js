@@ -17,7 +17,7 @@ function formatEth(eth) {
 }
 
 function shortPubkey(pubkey) {
-    return `${pubkey.slice(0, 10)}…${pubkey.slice(-6)}`;
+    return pubkey.slice(0, 8);
 }
 
 function formatDuration(seconds) {
@@ -29,24 +29,24 @@ function formatDuration(seconds) {
 
 function keyLabel(key, marked) {
     const index = key.genIndex !== undefined ? key.genIndex : key.position;
-    return `${marked ? '▸ ' : ''}#${index} ${shortPubkey(key.pubkey)}`;
+    return `${marked ? '> ' : ''}#${index} ${shortPubkey(key.pubkey)}`;
 }
 
 function keyValue(key, type) {
     if (key.state === IN_DEPOSIT_QUEUE) {
-        return `${formatEth(key.balanceEth)} · in queue #${key.queue.position} · ~${formatDuration(key.queue.estimatedWaitSeconds)}`;
+        return `${formatEth(key.balanceEth)} | in queue #${key.queue.position} | ~${formatDuration(key.queue.estimatedWaitSeconds)}`;
     }
     if (key.state === NOT_DEPOSITED) return 'not deposited';
     if (key.state === UNKNOWN) return 'no validator record';
 
-    let value = `${formatEth(key.balanceEth)} · ${key.state}`;
+    let value = `${formatEth(key.balanceEth)} | ${key.state}`;
     if (key.pendingTopUpEth) {
-        value += ` · +${formatEth(key.pendingTopUpEth)} queued`;
+        value += ` | +${formatEth(key.pendingTopUpEth)} queued`;
     }
     // A cmv2 key that is not 0x02 cannot accumulate past 32 ETH — worth
     // seeing at a glance rather than hunting for in the JSON report.
     if (type === 'cmv2' && key.credentials && key.credentials !== COMPOUNDING_CREDENTIALS) {
-        value += ` · ⚠ ${key.credentials}`;
+        value += ` | ⚠ ${key.credentials}`;
     }
     return value;
 }
@@ -104,7 +104,7 @@ function frontierSections(report, window) {
 
     if (lastDeposited >= 0 && firstUndeposited >= 0) {
         sections.push({
-            header: 'Deposit frontier — last key on chain → first not deposited',
+            header: 'Deposit frontier - last key on chain -> first not deposited',
             facts: windowFacts(report, lastDeposited - window + 1, firstUndeposited + window - 1, lastDeposited)
         });
     } else if (lastDeposited < 0) {
@@ -115,12 +115,12 @@ function frontierSections(report, window) {
 
     if (firstBelowCap >= 0) {
         sections.push({
-            header: `Fill frontier — first key below ${maxBalanceEth} ETH`,
+            header: `Fill frontier - first key below ${maxBalanceEth} ETH`,
             facts: windowFacts(report, firstBelowCap - window + 1, firstBelowCap + window, firstBelowCap)
         });
     } else {
         sections.push({
-            header: `Fill frontier — first key below ${maxBalanceEth} ETH`,
+            header: `Fill frontier - first key below ${maxBalanceEth} ETH`,
             facts: [hasActiveKeys
                 ? { title: 'None', value: `every active key is at the ${maxBalanceEth} ETH cap` }
                 : { title: 'None', value: 'no key is active yet' }]
@@ -213,7 +213,7 @@ function buildCards(report, options = {}) {
     }
 
     // Measured against a worst-case title so the real titles always fit.
-    const probeTitle = `${report.name} — keys (99/99)`;
+    const probeTitle = `${report.name} - keys (99/99)`;
     const perCard = fittingRowCount(probeTitle, facts, maxBytes, maxFacts);
     const cardCount = Math.ceil(facts.length / perCard);
     const evenRows = Math.ceil(facts.length / cardCount);
@@ -222,7 +222,7 @@ function buildCards(report, options = {}) {
     for (let i = 0; i < cardCount; i++) {
         const slice = facts.slice(i * evenRows, (i + 1) * evenRows);
         if (slice.length === 0) break;
-        const title = cardCount > 1 ? `${report.name} — keys (${i + 1}/${cardCount})` : `${report.name} — keys`;
+        const title = cardCount > 1 ? `${report.name} - keys (${i + 1}/${cardCount})` : `${report.name} - keys`;
         cards.push(makeMessage(title, [{ facts: slice }]));
     }
     return cards;

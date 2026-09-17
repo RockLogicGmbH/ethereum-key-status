@@ -212,19 +212,19 @@ Lido CSM v2 (Obol DVT)
   Total balance       4064.01 ETH
   Avg / min / max       32.00 / 32.00 / 32.01 ETH
 
-  Deposit frontier — last key on chain → first not deposited
-    #125 0xcccccccc…cf1ac0    32.00 ETH · in queue #55119 · ~31 d
-  ▸ #126 0xcccccccc…cf39af    32.00 ETH · in queue #55120 · ~31 d
-    #127 0xcccccccc…cf589e    not deposited
-    #128 0xcccccccc…cf778d    not deposited
+  Deposit frontier - last key on chain -> first not deposited
+    #125 0x8b8159    32.00 ETH | in queue #55119 | ~31 d
+  > #126 0x51344c    32.00 ETH | in queue #55120 | ~31 d
+    #127 0xf42cb4    not deposited
+    #128 0xfe6736    not deposited
 
-  Fill frontier — first key below 2048 ETH
-  ▸ #0 0xcccccccc…cccccd      32.00 ETH · active_ongoing
-    #1 0xcccccccc…cc1efc      32.00 ETH · active_ongoing
-    #2 0xcccccccc…cc3deb      32.01 ETH · active_ongoing
+  Fill frontier - first key below 2048 ETH
+  > #0 0xd1a5ac      32.00 ETH | active_ongoing
+    #1 0x6ab9f1      32.00 ETH | active_ongoing
+    #2 0x015f7e      32.01 ETH | active_ongoing
 ```
 
-`▸` marks the frontier key itself, and `⚠` marks a CMv2 key whose withdrawal
+`>` marks the frontier key itself, and `⚠` marks a CMv2 key whose withdrawal
 credentials are not `0x02` — it cannot accumulate past 32 ETH.
 
 Setting `"perKeyCard": true` on a key set restores the full listing, one row
@@ -237,8 +237,8 @@ never reached the channel. The documented ceiling is around 28 KB, so the
 defaults stay well under it and cap the row count as well.
 
 A key set whose rows exceed `MAX_CARD_BYTES` or `MAX_FACTS_PER_CARD` is posted
-as a **summary card followed by numbered row cards** (`… — keys (1/2)`,
-`… — keys (2/2)`). The rows are spread evenly rather than packing the first
+as a **summary card followed by numbered row cards** (`... - keys (1/2)`,
+`... - keys (2/2)`). The rows are spread evenly rather than packing the first
 card to the limit, and the summary always gets a card of its own so the
 headline numbers cannot be the thing that gets dropped. At 500 keys this is
 six posts of under 8 KB each.
