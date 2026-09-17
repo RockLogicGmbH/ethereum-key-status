@@ -65,7 +65,8 @@ cp .env.example .env
 | `CHUNK_SIZE`                  | `500`                                          | Keys per request for the single-set fallback, and for the `GET` fallback generally.                              |
 | `WEBHOOK_URL`                 | _(empty)_                                      | Microsoft Teams **Workflows** incoming webhook URL. If empty, the Teams notification is skipped.                 |
 | `DEPOSIT_CHURN_ETH_PER_EPOCH` | `256`                                          | Per-epoch deposit churn used to estimate queue wait time. Mainnet caps this at 256 ETH.                          |
-| `MAX_CARD_BYTES`              | `25000`                                        | Size budget per Teams card. Per-key cards are split across several posts when they would exceed it.              |
+| `MAX_CARD_BYTES`              | `16000`                                        | Size budget per Teams card. Per-key rows are split across several posts when they would exceed it.               |
+| `MAX_FACTS_PER_CARD`          | `100`                                          | Maximum per-key rows on one card. Long FactSets fail to render before they hit any byte limit.                   |
 | `WEBHOOK_DELAY_MS`            | `500`                                          | Pause between posts when one key set needs more than one card.                                                   |
 
 ### Key sets
@@ -194,9 +195,21 @@ A CMv2 card lists one row per key, e.g.:
 A `⚠` marks a CMv2 key whose withdrawal credentials are not `0x02` — it
 cannot accumulate past 32 ETH.
 
-Teams rejects payloads over roughly 28 KB, so a key set whose rows exceed
-`MAX_CARD_BYTES` is posted as several numbered cards (`… (1/2)`, `… (2/2)`).
-At 500 keys this is two posts.
+Teams Workflows answers `202 Accepted` as soon as it receives the POST —
+*before* it tries to render the card. An oversized payload is therefore
+accepted and then **silently dropped**: nothing in the response says the card
+never reached the channel. The documented ceiling is around 28 KB, so the
+defaults stay well under it and cap the row count as well.
+
+A key set whose rows exceed `MAX_CARD_BYTES` or `MAX_FACTS_PER_CARD` is posted
+as a **summary card followed by numbered row cards** (`… — keys (1/2)`,
+`… — keys (2/2)`). The rows are spread evenly rather than packing the first
+card to the limit, and the summary always gets a card of its own so the
+headline numbers cannot be the thing that gets dropped. At 500 keys this is
+six posts of under 8 KB each.
+
+The log records the size of every post (`Webhook accepted (HTTP 202, 4.7 KB)`)
+so a card that vanishes can be traced.
 
 ### Testing the webhook
 

@@ -5,7 +5,7 @@ const path = require('path');
 const { loadKeySets } = require('./keysets');
 const { normalizePubkey, checkFullnodes, fetchValidators, fetchDepositQueue } = require('./beacon');
 const { buildReport } = require('./status');
-const { buildCards, getAdaptiveCard, DEFAULT_MAX_CARD_BYTES } = require('./cards');
+const { buildCards, getAdaptiveCard, DEFAULT_MAX_CARD_BYTES, DEFAULT_MAX_FACTS_PER_CARD } = require('./cards');
 
 const NODE_ENDPOINT = process.env.NODE_ENDPOINT || '127.0.0.1:5052,127.0.0.1:3500,127.0.0.1:5051';
 const WEBHOOK_URL = process.env.WEBHOOK_URL || '';
@@ -13,6 +13,7 @@ const WEBHOOK_URL = process.env.WEBHOOK_URL || '';
 // queue wait estimate is based on.
 const CHURN_ETH_PER_EPOCH = parseFloat(process.env.DEPOSIT_CHURN_ETH_PER_EPOCH) || 256;
 const MAX_CARD_BYTES = parseInt(process.env.MAX_CARD_BYTES, 10) || DEFAULT_MAX_CARD_BYTES;
+const MAX_FACTS_PER_CARD = parseInt(process.env.MAX_FACTS_PER_CARD, 10) || DEFAULT_MAX_FACTS_PER_CARD;
 const WEBHOOK_DELAY_MS = parseInt(process.env.WEBHOOK_DELAY_MS, 10) || 500;
 
 const RESET = '\x1b[0m';
@@ -27,17 +28,20 @@ async function postCard(message, url = WEBHOOK_URL) {
         logger.error('No Webhook URL');
         return false;
     }
+    const body = JSON.stringify(message);
     const options = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(message)
+        body
     };
     try {
         const response = await fetch(url, options);
         if (response.ok) {
             // Teams Workflows (Power Automate) reply with 202 Accepted and an
-            // empty body, so there is nothing to parse here.
-            logger.info('Webhook delivered (HTTP ' + response.status + ')');
+            // empty body before they try to render the card, so this confirms
+            // receipt only — an oversized card is accepted and then dropped
+            // without telling us. Hence the size in the log.
+            logger.info(`Webhook accepted (HTTP ${response.status}, ${(body.length / 1024).toFixed(1)} KB)`);
             return true;
         }
         logger.error('Error calling webhook: ' + await response.text());
@@ -165,9 +169,9 @@ async function processKeySet(keySet, nodes, queueCache) {
     logReport(report);
     await writeResults(report);
 
-    const cards = buildCards(report, MAX_CARD_BYTES);
+    const cards = buildCards(report, MAX_CARD_BYTES, MAX_FACTS_PER_CARD);
     if (cards.length > 1) {
-        logger.info(`Posting ${cards.length} cards for ${report.name} (per-key rows exceed the Teams payload limit)`);
+        logger.info(`Posting ${cards.length} cards for ${report.name}: a summary card plus ${cards.length - 1} card(s) of per-key rows`);
     }
     let delivered = true;
     for (let i = 0; i < cards.length; i++) {

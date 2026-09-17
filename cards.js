@@ -1,9 +1,13 @@
 // cards.js — builds the Adaptive Cards posted to Teams.
 const { IN_DEPOSIT_QUEUE, NOT_DEPOSITED, UNKNOWN } = require('./status');
 
-// Teams rejects payloads over ~28 KB. A cmv2 set lists one row per key and
-// can reach 500 keys, so the rows are spread over as many cards as needed.
-const DEFAULT_MAX_CARD_BYTES = 25000;
+// Teams Workflows answers 202 the moment it receives the POST, before it
+// tries to render the card, so an oversized payload is accepted and then
+// dropped without any error reaching us. The documented ceiling is ~28 KB;
+// stay well under it, and cap the row count too — long FactSets fail to
+// render before they hit any byte limit.
+const DEFAULT_MAX_CARD_BYTES = 16000;
+const DEFAULT_MAX_FACTS_PER_CARD = 100;
 const COMPOUNDING_CREDENTIALS = '0x02';
 
 function formatEth(eth) {
@@ -120,38 +124,56 @@ function getAdaptiveCard(data, title = 'Lido Key Status') {
     return makeMessage(title, facts);
 }
 
+// Largest number of rows that still fits the budget, found by bisection so
+// a single oversized row cannot wedge the loop.
+function fittingRowCount(title, summary, facts, maxBytes, maxFacts) {
+    let low = 1;
+    let high = Math.min(facts.length, maxFacts);
+    while (low < high) {
+        const mid = Math.ceil((low + high) / 2);
+        if (JSON.stringify(makeMessage(title, summary, facts.slice(0, mid))).length <= maxBytes) {
+            low = mid;
+        } else {
+            high = mid - 1;
+        }
+    }
+    return low;
+}
+
 // Returns the list of Teams messages for one key set: a single card for the
 // aggregate view, or a summary card followed by as many per-key cards as the
 // size budget requires.
-function buildCards(report, maxBytes = DEFAULT_MAX_CARD_BYTES) {
+//
+// When the rows do not fit one card the summary gets a card of its own. It
+// carries the numbers that matter most, so it must never be the card that
+// grows large enough to be dropped, and the rows are then spread evenly
+// rather than packing the first card to the limit.
+function buildCards(report, maxBytes = DEFAULT_MAX_CARD_BYTES, maxFacts = DEFAULT_MAX_FACTS_PER_CARD) {
     const summary = summaryFacts(report);
     if (!report.perKeyCard) {
         return [makeMessage(report.name, summary)];
     }
 
     const facts = report.keys.map(key => keyFact(key, report.type));
-    // Measured against a worst-case title so the real titles always fit.
-    const probeTitle = `${report.name} (99/99)`;
-    const groups = [];
-    let current = [];
-    let withSummary = true;
-    for (const fact of facts) {
-        const candidate = current.concat([fact]);
-        const size = JSON.stringify(makeMessage(probeTitle, withSummary ? summary : null, candidate)).length;
-        if (current.length > 0 && size > maxBytes) {
-            groups.push({ facts: current, summary: withSummary });
-            withSummary = false;
-            current = [fact];
-        } else {
-            current = candidate;
-        }
+    const single = makeMessage(report.name, summary, facts);
+    if (facts.length <= maxFacts && JSON.stringify(single).length <= maxBytes) {
+        return [single];
     }
-    groups.push({ facts: current, summary: withSummary });
 
-    return groups.map((group, i) => {
-        const title = groups.length > 1 ? `${report.name} (${i + 1}/${groups.length})` : report.name;
-        return makeMessage(title, group.summary ? summary : null, group.facts);
-    });
+    // Measured against a worst-case title so the real titles always fit.
+    const probeTitle = `${report.name} — keys (99/99)`;
+    const perCard = fittingRowCount(probeTitle, null, facts, maxBytes, maxFacts);
+    const cardCount = Math.ceil(facts.length / perCard);
+    const evenRows = Math.ceil(facts.length / cardCount);
+
+    const cards = [makeMessage(report.name, summary)];
+    for (let i = 0; i < cardCount; i++) {
+        const slice = facts.slice(i * evenRows, (i + 1) * evenRows);
+        if (slice.length === 0) break;
+        const title = cardCount > 1 ? `${report.name} — keys (${i + 1}/${cardCount})` : `${report.name} — keys`;
+        cards.push(makeMessage(title, null, slice));
+    }
+    return cards;
 }
 
 module.exports = {
@@ -162,5 +184,6 @@ module.exports = {
     formatEth,
     formatDuration,
     shortPubkey,
-    DEFAULT_MAX_CARD_BYTES
+    DEFAULT_MAX_CARD_BYTES,
+    DEFAULT_MAX_FACTS_PER_CARD
 };
