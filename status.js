@@ -1,4 +1,4 @@
-// status.js — turns raw beacon data into the per-key-set report.
+// status.js - turns raw beacon data into the per-key-set report.
 const { gweiToEth, estimateQueueWaitSeconds } = require('./beacon');
 
 // Deposited on the execution chain but not yet processed by the beacon

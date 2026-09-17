@@ -48,10 +48,10 @@ async function main() {
         ok = await postCard(card) && ok;
     }
     if (ok) {
-        logger.info('Webhook test succeeded — check the Teams channel for the cards.');
+        logger.info('Webhook test succeeded - check the Teams channel for the cards.');
         process.exit(0);
     }
-    logger.error('Webhook test failed — see the error above.');
+    logger.error('Webhook test failed - see the error above.');
     process.exit(1);
 }
 

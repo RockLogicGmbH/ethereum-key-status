@@ -42,7 +42,7 @@ async function postCard(message, url = WEBHOOK_URL) {
         if (response.ok) {
             // Teams Workflows (Power Automate) reply with 202 Accepted and an
             // empty body before they try to render the card, so this confirms
-            // receipt only — an oversized card is accepted and then dropped
+            // receipt only - an oversized card is accepted and then dropped
             // without telling us. Hence the size in the log.
             logger.info(`Webhook accepted (HTTP ${response.status}, ${(body.length / 1024).toFixed(1)} KB)`);
             return true;
@@ -170,11 +170,11 @@ async function processKeySet(keySet, nodes, queueCache) {
 
     const missing = keys.filter(key => !fetched.validators.has(key.pubkey)).length;
     // cmv2 keys are 0x02 and may have top-ups waiting in the same queue, so
-    // the queue is always relevant there — not only when keys are missing.
+    // the queue is always relevant there - not only when keys are missing.
     let queue = null;
     if (missing > 0 || keySet.type === 'cmv2') {
         if (missing > 0) {
-            logger.info(missing + ' key(s) have no validator record — checking the deposit queue');
+            logger.info(missing + ' key(s) have no validator record - checking the deposit queue');
         }
         queue = await getDepositQueue(nodes, queueCache);
     }

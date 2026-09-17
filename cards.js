@@ -1,10 +1,10 @@
-// cards.js — builds the Adaptive Cards posted to Teams.
+// cards.js - builds the Adaptive Cards posted to Teams.
 const { IN_DEPOSIT_QUEUE, NOT_DEPOSITED, UNKNOWN } = require('./status');
 
 // Teams Workflows answers 202 the moment it receives the POST, before it
 // tries to render the card, so an oversized payload is accepted and then
 // dropped without any error reaching us. The documented ceiling is ~28 KB;
-// stay well under it, and cap the row count too — long FactSets fail to
+// stay well under it, and cap the row count too - long FactSets fail to
 // render before they hit any byte limit.
 const DEFAULT_MAX_CARD_BYTES = 16000;
 const DEFAULT_MAX_FACTS_PER_CARD = 100;
@@ -29,7 +29,7 @@ function formatDuration(seconds) {
 
 function keyLabel(key, marked) {
     const index = key.genIndex !== undefined ? key.genIndex : key.position;
-    return `${marked ? '> ' : ''}#${index} ${shortPubkey(key.pubkey)}`;
+    return `${marked ? '=> ' : ''}#${index} ${shortPubkey(key.pubkey)}`;
 }
 
 function keyValue(key, type) {
@@ -43,10 +43,10 @@ function keyValue(key, type) {
     if (key.pendingTopUpEth) {
         value += ` | +${formatEth(key.pendingTopUpEth)} queued`;
     }
-    // A cmv2 key that is not 0x02 cannot accumulate past 32 ETH — worth
+    // A cmv2 key that is not 0x02 cannot accumulate past 32 ETH - worth
     // seeing at a glance rather than hunting for in the JSON report.
     if (type === 'cmv2' && key.credentials && key.credentials !== COMPOUNDING_CREDENTIALS) {
-        value += ` | ⚠ ${key.credentials}`;
+        value += ` | non-compounding ${key.credentials}`;
     }
     return value;
 }
@@ -76,7 +76,7 @@ function summaryFacts(report) {
             .filter(([type]) => type !== COMPOUNDING_CREDENTIALS)
             .reduce((sum, [, count]) => sum + count, 0);
         if (nonCompounding > 0) {
-            facts.push({ title: '⚠ Not 0x02', value: String(nonCompounding) });
+            facts.push({ title: 'Not 0x02 (non-compounding)', value: String(nonCompounding) });
         }
     }
     if (report.batches) {

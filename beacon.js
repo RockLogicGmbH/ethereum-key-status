@@ -1,4 +1,4 @@
-// beacon.js — access to the Ethereum beacon (consensus) node HTTP API.
+// beacon.js - access to the Ethereum beacon (consensus) node HTTP API.
 const logger = require('./logger');
 
 const GWEI_PER_ETH = 1e9;
@@ -71,7 +71,7 @@ async function fetchValidatorsGet(endpoint, pubkeys, chunkSize) {
 }
 
 // Queries the validator set for `pubkeys` and returns a Map keyed by pubkey.
-// Keys the beacon chain does not know about are simply absent from the map —
+// Keys the beacon chain does not know about are simply absent from the map -
 // the API omits unknown ids rather than erroring.
 async function fetchValidators(endpoint, pubkeys, chunkSize) {
     let data;
@@ -91,7 +91,7 @@ async function fetchValidators(endpoint, pubkeys, chunkSize) {
 
 // The Electra pending-deposit queue: deposits already made on the execution
 // chain that the beacon chain has not processed yet. A key sitting here has
-// no validator record at all, so it is invisible to /validators — and it can
+// no validator record at all, so it is invisible to /validators - and it can
 // stay here for weeks when the queue is long.
 async function fetchDepositQueue(endpoint) {
     const url = `http://${endpoint}/eth/v1/beacon/states/head/pending_deposits`;
@@ -99,7 +99,7 @@ async function fetchDepositQueue(endpoint) {
     try {
         const response = await fetch(url);
         if (!response.ok) {
-            logger.warn(`Deposit queue unavailable on ${endpoint} (HTTP ${response.status}) — keys without a validator record cannot be told apart from undeposited ones`);
+            logger.warn(`Deposit queue unavailable on ${endpoint} (HTTP ${response.status}) - keys without a validator record cannot be told apart from undeposited ones`);
             return null;
         }
         json = await response.json();

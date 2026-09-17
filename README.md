@@ -5,9 +5,9 @@ Ethereum validator keys against one or more beacon (consensus) nodes,
 aggregates the results, writes them to disk, and optionally posts a summary
 card per key set to a Microsoft Teams channel.
 
-It was built to monitor Lido CSM validator keys — both **CMv1** (`0x01`
+It was built to monitor Lido CSM validator keys - both **CMv1** (`0x01`
 withdrawal credentials, 32 ETH per validator) and **CMv2** (`0x02`
-compounding credentials, up to 2048 ETH per validator) — but works with any
+compounding credentials, up to 2048 ETH per validator) - but works with any
 list of validator public keys.
 
 ## What it does
@@ -24,7 +24,7 @@ On each run (`index.js`):
    the whole set), falling back to chunked `GET` requests on clients that do
    not support the POST form.
 4. **Resolves keys the beacon chain does not know about** against the Electra
-   deposit queue (`/eth/v1/beacon/states/head/pending_deposits`) — see
+   deposit queue (`/eth/v1/beacon/states/head/pending_deposits`) - see
    [The deposit queue](#the-deposit-queue).
 5. **Aggregates the results** into counts per state, plus balance statistics
    and the [frontiers](#frontiers) for `0x02` keys, and a per-batch breakdown
@@ -100,14 +100,14 @@ them in `keysets.json` (see `keysets.example.json`):
 | `keyFile`    | **yes**  | Path to this set's key JSON file.                                                             |
 | `chunkSize`  | no       | Keys per request for the `GET` fallback. Default `500`.                                       |
 | `webhookUrl` | no       | Post this set to a different channel than `WEBHOOK_URL`.                                      |
-| `perKeyCard` | no       | `true` lists every key on the card. Off by default — at 500 keys it is unreadable and needs several posts. |
+| `perKeyCard` | no       | `true` lists every key on the card. Off by default - at 500 keys it is unreadable and needs several posts. |
 
 `type` selects the reporting style:
 
 | Type   | Credentials       | Card                                                           | Batches |
 | ------ | ----------------- | -------------------------------------------------------------- | ------- |
-| `cmv1` | `0x01`, 32 ETH    | Aggregate counts only.                                          | Yes — per-`chunkSize` breakdown of active validators. |
-| `cmv2` | `0x02`, ≤2048 ETH | Aggregate counts, balance statistics and the two [frontiers](#frontiers). | No — a CMv2 set is capped at 500 keys on a single Obol DVT cluster, so there is nothing to split. |
+| `cmv1` | `0x01`, 32 ETH    | Aggregate counts only.                                          | Yes - per-`chunkSize` breakdown of active validators. |
+| `cmv2` | `0x02`, up to 2048 ETH | Aggregate counts, balance statistics and the two [frontiers](#frontiers). | No - a CMv2 set is capped at 500 keys on a single Obol DVT cluster, so there is nothing to split. |
 
 If `keysets.json` is absent the tool falls back to a single CMv1 set built
 from `KEY_JSON_PATH` and `CHUNK_SIZE`, so an existing `.env` keeps working
@@ -132,10 +132,10 @@ Each `keyFile` must point to a JSON array of objects, each with at least a
 Listing all 500 keys says very little, so a CMv2 card reports two boundaries
 instead, each with a small window of keys either side (`FRONTIER_WINDOW`):
 
-- **Deposit frontier** — the last key that made it onto the chain (active or
+- **Deposit frontier** - the last key that made it onto the chain (active or
   still queued) and the first one behind it that has not been deposited at
   all. This is how far down the key list deposits have reached.
-- **Fill frontier** — the first key still below the `CMV2_MAX_BALANCE_ETH`
+- **Fill frontier** - the first key still below the `CMV2_MAX_BALANCE_ETH`
   (2048 ETH) compounding cap, which is where the next top-up lands.
 
 Both are also written to the log and to the JSON report (`frontiers`), as
@@ -144,7 +144,7 @@ positions in the key file.
 ## The deposit queue
 
 Since Electra, a deposit made on the execution chain does not create a
-validator record immediately — it waits in the beacon chain's pending-deposit
+validator record immediately - it waits in the beacon chain's pending-deposit
 queue, which can take weeks to drain. A key in that queue is invisible to
 `/eth/v1/beacon/states/head/validators`, and the `pending_*` statuses only
 appear once the deposit has already been processed.
@@ -162,11 +162,11 @@ The tool therefore looks up every key without a validator record in
 the operator is committed to: all `active_*` states, all `pending_*` states,
 and `in_deposit_queue`. Keys that have not been deposited at all are excluded.
 
-The estimated wait is `ETH ahead in the queue ÷ DEPOSIT_CHURN_ETH_PER_EPOCH`
+The estimated wait is `ETH ahead in the queue / DEPOSIT_CHURN_ETH_PER_EPOCH`
 epochs. It is an estimate of when processing *starts*; activation adds further
 delay on top.
 
-For `0x02` keys the queue is also checked for **top-ups** — additional ETH
+For `0x02` keys the queue is also checked for **top-ups** - additional ETH
 sent towards the 2048 ETH cap for an already-active validator. These show on
 the card as `+<amount> ETH queued`.
 
@@ -193,7 +193,7 @@ Teams channel, one card per key set.
 > **Note:** Microsoft has retired the legacy **Office 365 Connector**
 > webhooks. This app targets the newer **Workflows** (Power Automate)
 > webhooks. Create one in Teams via
-> *channel → Workflows → "Post to a channel when a webhook request is
+> *channel > Workflows > "Post to a channel when a webhook request is
 > received"* and use the generated URL as `WEBHOOK_URL`.
 
 The card uses Adaptive Card schema **1.5** (the maximum the Teams client
@@ -213,24 +213,24 @@ Lido CSM v2 (Obol DVT)
   Avg / min / max       32.00 / 32.00 / 32.01 ETH
 
   Deposit frontier - last key on chain -> first not deposited
-    #125 0x8b8159    32.00 ETH | in queue #55119 | ~31 d
-  > #126 0x51344c    32.00 ETH | in queue #55120 | ~31 d
+     #125 0x8b8159   32.00 ETH | in queue #55119 | ~31 d
+  => #126 0x51344c   32.00 ETH | in queue #55120 | ~31 d
     #127 0xf42cb4    not deposited
     #128 0xfe6736    not deposited
 
   Fill frontier - first key below 2048 ETH
-  > #0 0xd1a5ac      32.00 ETH | active_ongoing
-    #1 0x6ab9f1      32.00 ETH | active_ongoing
-    #2 0x015f7e      32.01 ETH | active_ongoing
+  => #0 0xd1a5ac     32.00 ETH | active_ongoing
+     #1 0x6ab9f1     32.00 ETH | active_ongoing
+     #2 0x015f7e     32.01 ETH | active_ongoing
 ```
 
-`>` marks the frontier key itself, and `⚠` marks a CMv2 key whose withdrawal
-credentials are not `0x02` — it cannot accumulate past 32 ETH.
+`=>` marks the frontier key itself, and a key whose withdrawal credentials are
+not `0x02` is flagged `non-compounding` - it cannot accumulate past 32 ETH.
 
 Setting `"perKeyCard": true` on a key set restores the full listing, one row
 per key, spread over as many cards as the size budget allows.
 
-Teams Workflows answers `202 Accepted` as soon as it receives the POST —
+Teams Workflows answers `202 Accepted` as soon as it receives the POST -
 *before* it tries to render the card. An oversized payload is therefore
 accepted and then **silently dropped**: nothing in the response says the card
 never reached the channel. The documented ceiling is around 28 KB, so the
@@ -256,7 +256,7 @@ npm run test:webhook
 ```
 
 It posts one CMv1 and one CMv2 sample card and exits `0` on success or `1` on
-failure. A delivered message logs `Webhook delivered (HTTP 202)` — Teams
+failure. A delivered message logs `Webhook delivered (HTTP 202)` - Teams
 Workflows reply with `202 Accepted` and an empty body.
 
 ## Project layout
@@ -276,11 +276,11 @@ Workflows reply with `202 Accepted` and an empty body.
 
 ## Exit codes
 
-- `0` — completed successfully.
-- `1` — no synced beacon node available, an invalid key set config, at least
+- `0` - completed successfully.
+- `1` - no synced beacon node available, an invalid key set config, at least
   one key set failed to produce data or deliver its card, or (for
   `test:webhook`) the webhook send failed.
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+MIT - see [LICENSE](./LICENSE).

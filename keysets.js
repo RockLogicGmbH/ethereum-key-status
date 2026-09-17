@@ -1,4 +1,4 @@
-// keysets.js — resolves which sets of keys a run should check.
+// keysets.js - resolves which sets of keys a run should check.
 //
 // A run checks one or more key sets and posts one Teams card per set. Sets
 // are declared in a JSON config file (KEYSETS_PATH); when that file is
@@ -14,7 +14,7 @@ const TYPES = ['cmv1', 'cmv2'];
 // whole set goes out in one request; chunking only ever applies to the GET
 // fallback. cmv1 keeps the per-batch breakdown it has always reported.
 //
-// Neither type lists every key by default — at 500 keys that is unreadable
+// Neither type lists every key by default - at 500 keys that is unreadable
 // and does not fit a Teams card. Set "perKeyCard": true on a set to get the
 // full listing anyway.
 const TYPE_DEFAULTS = {
@@ -55,7 +55,7 @@ function loadKeySets(env = process.env) {
 
     if (!fs.existsSync(resolved)) {
         // Legacy single-set mode.
-        logger.info(`No key set config at ${configPath} — using the single key file from the environment`);
+        logger.info(`No key set config at ${configPath} - using the single key file from the environment`);
         return [normalizeSet({
             name: env.KEYSET_NAME || 'Lido Key Status',
             type: env.KEYSET_TYPE || 'cmv1',
