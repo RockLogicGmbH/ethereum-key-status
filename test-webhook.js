@@ -1,29 +1,54 @@
 require('dotenv').config();
 const logger = require('./logger');
-const { callWebhook } = require('./index');
+const { postCard } = require('./index');
+const { buildCards } = require('./cards');
 
-// A representative status payload, matching the shape produced by getStatus()
-// in index.js, so the rendered Adaptive Card looks like a real run.
-const sampleStatus = {
-    test: 'webhook connectivity check',
-    active_ongoing: 1234,
-    withdrawal_possible: 12,
-    withdrawal_done: 3,
-    '0-500': 500,
-    '500-1000': 500,
-    '1000-1500': 249,
+// Representative reports, matching the shape buildReport() produces in
+// status.js, so the rendered Adaptive Cards look like a real run.
+const cmv1Report = {
+    name: 'Lido CSM v1 (test)',
+    type: 'cmv1',
+    perKeyCard: false,
+    totals: { keys: 1249, active: 1234 },
+    stateCounts: { active_ongoing: 1234, withdrawal_possible: 12, withdrawal_done: 3 },
+    credentials: { '0x01': 1249 },
+    batches: { '0-500': 500, '500-1000': 500, '1000-1500': 234 },
+    keys: []
+};
+
+const cmv2Report = {
+    name: 'Lido CSM v2 (test)',
+    type: 'cmv2',
+    perKeyCard: true,
+    totals: {
+        keys: 5, active: 4,
+        balanceTotalEth: 3168.42, balanceAvgEth: 792.11,
+        balanceMinEth: 32, balanceMaxEth: 2048, pendingTopUpEth: 256
+    },
+    stateCounts: { active_ongoing: 3, in_deposit_queue: 1, not_deposited: 1 },
+    credentials: { '0x02': 3 },
+    keys: [
+        { pubkey: '0xaf59776ab9eafa0c9524f1e76daafaa5666c8ea16e129274bcefa8c72d8d4ddd6e71f409b9da43a05ca4ea5d1033ebf3', state: 'active_ongoing', balanceEth: 2048, credentials: '0x02' },
+        { pubkey: '0xb1c2d3e4f5a6978877665544332211009988776655443322110099887766554433221100998877665544332211009988', state: 'active_ongoing', balanceEth: 1056.42, credentials: '0x02', pendingTopUpEth: 256 },
+        { pubkey: '0xc2d3e4f5a697887766554433221100998877665544332211009988776655443322110099887766554433221100998877', state: 'active_ongoing', balanceEth: 32, credentials: '0x01' },
+        { pubkey: '0xd3e4f5a69788776655443322110099887766554433221100998877665544332211009988776655443322110099887766', state: 'in_deposit_queue', balanceEth: 32, queue: { position: 48213, ethAhead: 1542816, estimatedWaitSeconds: 3456000 } },
+        { pubkey: '0xe4f5a6978877665544332211009988776655443322110099887766554433221100998877665544332211009988776655', state: 'not_deposited' }
+    ]
 };
 
 async function main() {
-    logger.info('Sending test message to Teams webhook...');
-    const ok = await callWebhook(sampleStatus);
-    if (ok) {
-        logger.info('Webhook test succeeded — check the Teams channel for the card.');
-        process.exit(0);
-    } else {
-        logger.error('Webhook test failed — see the error above.');
-        process.exit(1);
+    const cards = [...buildCards(cmv1Report), ...buildCards(cmv2Report)];
+    logger.info(`Sending ${cards.length} test card(s) to the Teams webhook...`);
+    let ok = true;
+    for (const card of cards) {
+        ok = await postCard(card) && ok;
     }
+    if (ok) {
+        logger.info('Webhook test succeeded — check the Teams channel for the cards.');
+        process.exit(0);
+    }
+    logger.error('Webhook test failed — see the error above.');
+    process.exit(1);
 }
 
 main();

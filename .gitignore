@@ -4,3 +4,5 @@ keys*.json
 .env
 node_modules
 results/*
+keysets.json
+!keysets.example.json

@@ -1,0 +1,13 @@
+[
+  {
+    "name": "Lido CSM v1",
+    "type": "cmv1",
+    "keyFile": "./keys-cmv1.json",
+    "chunkSize": 500
+  },
+  {
+    "name": "Lido CSM v2 (Obol DVT)",
+    "type": "cmv2",
+    "keyFile": "./keys-cmv2.json"
+  }
+]
