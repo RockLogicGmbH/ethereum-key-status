@@ -1,8 +1,12 @@
 error.log
 combined.log
+logs/
+dist/
 keys*.json
 .env
 node_modules
 results/*
+config/*
+!config/.gitkeep
 keysets.json
 !keysets.example.json
