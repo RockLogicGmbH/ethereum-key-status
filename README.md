@@ -273,6 +273,15 @@ the unprivileged `node` user (uid 1000) under `tini` so signals reach the
 process, and includes `tzdata` so `TZ` works. Its default command is
 scheduler mode.
 
+Released images are published to GHCR as
+`ghcr.io/rocklogicgmbh/ethereum-key-status` (see [Release
+process](#release-process)). `docker-compose.yml` uses that image,
+`${KEYSTATUS_IMAGE:-ghcr.io/rocklogicgmbh/ethereum-key-status}:${KEYSTATUS_IMAGE_TAG:-latest}`,
+so a server only needs the compose file, `.env` and `config/` - not the
+source. Pin `KEYSTATUS_IMAGE_TAG` to a release in `.env` and update by
+changing it and running `docker compose pull && docker compose up -d`.
+`docker compose build` builds the same tag from source instead.
+
 ### docker compose
 
 Lay out the host directory like this:
@@ -345,17 +354,17 @@ the Docker host itself and listens on `127.0.0.1` only.
 ### Plain docker
 
 ```bash
-docker build -t keystatus .
+IMAGE=ghcr.io/rocklogicgmbh/ethereum-key-status:2.0.0   # or: docker build -t keystatus .
 # -e after --env-file: pins the in-container paths even if .env still has
 # host-relative KEYSETS_PATH / KEY_JSON_PATH values.
 PATHS="-e KEYSETS_PATH=/app/config/keysets.json -e KEY_JSON_PATH=/app/config/keys.json"
 docker run -d --name keystatus --restart unless-stopped \
   --env-file .env $PATHS -e TZ=Europe/Vienna \
   -v "$PWD/config:/app/config:ro" -v "$PWD/results:/app/results" -v "$PWD/logs:/app/logs" \
-  keystatus
+  "$IMAGE"
 docker run --rm --env-file .env $PATHS \
   -v "$PWD/config:/app/config:ro" -v "$PWD/results:/app/results" \
-  keystatus node dist/index.js --once
+  "$IMAGE" node dist/index.js --once
 ```
 
 `--env-file` takes precedence over the image's `ENV` defaults, so without
@@ -497,6 +506,22 @@ webhook, and the scheduler (the default resolves to 00:00 on 1 January,
 April, July and October; runs do not overlap; shutdown waits for a
 running check).
 
+## Release process
+
+Images are built by `.github/workflows/docker.yml` and pushed to GHCR
+(`ghcr.io/rocklogicgmbh/ethereum-key-status`). The image build runs the
+type check and the tests, so a failing test stops the release. Pushes to
+branches do not build images.
+
+1. Bump `version` in `package.json` (`npm version X.Y.Z --no-git-tag-version`,
+   which also updates `package-lock.json`) and merge to `main`.
+2. Tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z`. The workflow
+   fails if the tag does not match the version in `package.json`. It
+   publishes `X.Y.Z`, `X.Y`, `X` (not for `0.x`) and `latest`.
+3. For an edge build from `main`, run the workflow manually
+   (workflow_dispatch) on `main`. It publishes `edge` and `sha-<commit>`.
+   Manual runs on other branches are rejected.
+
 ## Project layout
 
 | File                   | Purpose                                                              |
@@ -516,6 +541,7 @@ running check).
 | `src/healthcheck.ts`, `src/heartbeat.ts` | Docker `HEALTHCHECK` probe and the heartbeat file location. |
 | `test/`                | Unit tests (`node:test`) and fixtures.                               |
 | `Dockerfile`, `docker-compose.yml` | Container image and deployment.                          |
+| `.github/workflows/docker.yml` | Builds the image on `vX.Y.Z` tags and pushes it to GHCR.  |
 | `keysets.example.json` | Template for the key set config.                                     |
 | `.env.example`         | Template for the supported environment variables.                    |
 | `dist/`                | Compiled output of `npm run build` (git-ignored).                    |

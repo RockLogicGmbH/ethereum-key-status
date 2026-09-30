@@ -16,6 +16,13 @@ RUN npm run typecheck && npm test && npm run build
 # ---- runtime: production dependencies and the compiled JS only -------------
 FROM node:22-alpine AS runtime
 
+ARG VERSION=dev
+ARG REVISION=unknown
+LABEL org.opencontainers.image.title="ethereum-key-status" \
+      org.opencontainers.image.description="Checks Ethereum validator key status against beacon nodes and posts a summary to Microsoft Teams on a schedule" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${REVISION}"
+
 # tini forwards SIGTERM from `docker stop` to node and reaps zombies, so the
 # scheduler's graceful shutdown actually runs. tzdata makes TZ=Europe/Vienna
 # (or any other zone) work on alpine, which ships without zone files.

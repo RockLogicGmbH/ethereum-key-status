@@ -1,7 +1,10 @@
 services:
   keystatus:
     build: .
-    image: keystatus:latest
+    # Published by .github/workflows/docker.yml. Pin KEYSTATUS_IMAGE_TAG to a
+    # release (e.g. 2.0.0) in .env on servers; `docker compose build` builds
+    # the same tag locally instead.
+    image: ${KEYSTATUS_IMAGE:-ghcr.io/rocklogicgmbh/ethereum-key-status}:${KEYSTATUS_IMAGE_TAG:-latest}
     container_name: keystatus
     restart: unless-stopped
     # `docker compose down/stop` waits for a running check to finish before
