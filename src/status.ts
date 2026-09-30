@@ -1,26 +1,57 @@
-// status.js - turns raw beacon data into the per-key-set report.
-const { gweiToEth, estimateQueueWaitSeconds } = require('./beacon');
+// status.ts - turns raw beacon data into the per-key-set report.
+import { gweiToEth, estimateQueueWaitSeconds } from './beacon.js';
+import type {
+    DepositQueue,
+    Frontiers,
+    KeyEntry,
+    KeyReport,
+    KeySet,
+    QueuedDeposit,
+    Report,
+    ValidatorEntry,
+    ValidatorMap
+} from './types.js';
 
 // Deposited on the execution chain but not yet processed by the beacon
 // chain: no validator record exists, yet the key is committed and counts
 // towards the operator's active keys.
-const IN_DEPOSIT_QUEUE = 'in_deposit_queue';
+export const IN_DEPOSIT_QUEUE = 'in_deposit_queue';
 // In the key file, but neither a validator nor a queued deposit.
-const NOT_DEPOSITED = 'not_deposited';
+export const NOT_DEPOSITED = 'not_deposited';
 // Same as above, but the node could not tell us about the queue.
-const UNKNOWN = 'unknown';
+export const UNKNOWN = 'unknown';
 
-function isActiveState(state) {
+export interface ReportOptions {
+    endpoint: string;
+    churnEthPerEpoch: number;
+    maxBalanceEth: number;
+}
+
+interface KeyReportOptions {
+    churnEthPerEpoch: number;
+    queueKnown: boolean;
+}
+
+// The fields computeFrontiers() looks at; test-webhook feeds it hand-written
+// sample keys, not full reports.
+export type FrontierKey = Pick<KeyReport, 'state' | 'validatorIndex' | 'balanceEth'>;
+
+export function isActiveState(state: string): boolean {
     return state.startsWith('active_') || state.startsWith('pending_') || state === IN_DEPOSIT_QUEUE;
 }
 
-function credentialsType(withdrawalCredentials) {
+function credentialsType(withdrawalCredentials: string | undefined): string | null {
     return withdrawalCredentials ? withdrawalCredentials.slice(0, 4) : null;
 }
 
-function buildKeyReport(key, validator, queued, options) {
+function buildKeyReport(
+    key: KeyEntry,
+    validator: ValidatorEntry | undefined,
+    queued: QueuedDeposit | undefined,
+    options: KeyReportOptions
+): KeyReport {
     const { churnEthPerEpoch } = options;
-    const report = {
+    const report: KeyReport = {
         pubkey: key.pubkey,
         genIndex: key.genIndex,
         state: UNKNOWN
@@ -64,8 +95,8 @@ function buildKeyReport(key, validator, queued, options) {
 //    deposited at all, i.e. how far down the key list deposits have reached;
 //  - the fill frontier: the first key still below the 2048 ETH compounding
 //    cap, i.e. where the next top-up lands.
-function computeFrontiers(keys, maxBalanceEth) {
-    const isOnChain = key => key.state !== NOT_DEPOSITED && key.state !== UNKNOWN;
+export function computeFrontiers(keys: FrontierKey[], maxBalanceEth: number): Frontiers {
+    const isOnChain = (key: FrontierKey): boolean => key.state !== NOT_DEPOSITED && key.state !== UNKNOWN;
 
     let lastDeposited = -1;
     for (let i = keys.length - 1; i >= 0; i--) {
@@ -78,8 +109,9 @@ function computeFrontiers(keys, maxBalanceEth) {
 
     let firstBelowCap = -1;
     for (let i = 0; i < keys.length; i++) {
+        const key = keys[i];
         // Only keys with a validator record can take a top-up.
-        if (keys[i].validatorIndex !== undefined && keys[i].balanceEth < maxBalanceEth) {
+        if (key.validatorIndex !== undefined && key.balanceEth !== undefined && key.balanceEth < maxBalanceEth) {
             firstBelowCap = i;
             break;
         }
@@ -94,12 +126,18 @@ function computeFrontiers(keys, maxBalanceEth) {
     };
 }
 
-function buildReport(keySet, keys, validators, queue, options) {
+export function buildReport(
+    keySet: KeySet,
+    keys: KeyEntry[],
+    validators: ValidatorMap,
+    queue: DepositQueue | null,
+    options: ReportOptions
+): Report {
     const churnEthPerEpoch = options.churnEthPerEpoch;
     const queueKnown = queue !== null;
     const keyReports = keys.map((key, i) => {
         const validator = validators.get(key.pubkey);
-        const queued = queueKnown ? queue.byPubkey.get(key.pubkey) : undefined;
+        const queued = queue !== null ? queue.byPubkey.get(key.pubkey) : undefined;
         const report = buildKeyReport(key, validator, queued, { churnEthPerEpoch, queueKnown });
         report.position = i;
         if (keySet.reportBatches) {
@@ -109,13 +147,13 @@ function buildReport(keySet, keys, validators, queue, options) {
         return report;
     });
 
-    const stateCounts = {};
-    const batches = {};
-    const credentials = {};
+    const stateCounts: Record<string, number> = {};
+    const batches: Record<string, number> = {};
+    const credentials: Record<string, number> = {};
     let balanceTotalEth = 0;
     let pendingTopUpEth = 0;
-    let balanceMinEth = null;
-    let balanceMaxEth = null;
+    let balanceMinEth: number | null = null;
+    let balanceMaxEth: number | null = null;
     let balancedKeys = 0;
 
     for (const key of keyReports) {
@@ -164,9 +202,9 @@ function buildReport(keySet, keys, validators, queue, options) {
         stateCounts,
         credentials,
         frontiers: computeFrontiers(keyReports, options.maxBalanceEth),
+        // undefined (rather than a missing key) mirrors the original object
+        // shape; JSON.stringify drops it from the written report either way.
         batches: keySet.reportBatches ? batches : undefined,
         keys: keyReports
     };
 }
-
-module.exports = { buildReport, computeFrontiers, isActiveState, IN_DEPOSIT_QUEUE, NOT_DEPOSITED, UNKNOWN };

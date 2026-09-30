@@ -1,0 +1,50 @@
+services:
+  keystatus:
+    build: .
+    image: keystatus:latest
+    container_name: keystatus
+    restart: unless-stopped
+    # `docker compose down/stop` waits for a running check to finish before
+    # the container exits; allow more than the default 10 s for that.
+    stop_grace_period: 2m
+    # NODE_ENDPOINT, WEBHOOK_URL, SCHEDULE, ... (see .env.example).
+    env_file: .env
+    environment:
+      # Wall-clock zone the SCHEDULE is evaluated in (and log timestamps).
+      # Set TZ in .env to override; SCHEDULE_TIMEZONE overrides it for the
+      # schedule only.
+      TZ: ${TZ:-Europe/Vienna}
+      # Paths inside the container; they match the volumes below. These
+      # override KEYSETS_PATH / KEY_JSON_PATH from .env, whose host-relative
+      # values (./keysets.json, ./keys.json) would resolve to /app/..., where
+      # nothing is mounted.
+      KEYSETS_PATH: /app/config/keysets.json
+      # Legacy single-set mode (no config/keysets.json): put keys.json into
+      # ./config. With a keysets.json this is unused.
+      KEY_JSON_PATH: /app/config/keys.json
+      RESULTS_DIR: /app/results
+      LOG_DIR: /app/logs
+
+    # The beacon nodes run on another host, so the default bridge network is
+    # all that is needed: set NODE_ENDPOINT in .env to their address, e.g.
+    # NODE_ENDPOINT=10.0.0.12:5052,10.0.0.12:3500. 127.0.0.1 inside the
+    # container is the container itself. Only if a beacon node runs on this
+    # Docker host and listens on 127.0.0.1 only, uncomment:
+    # network_mode: host
+
+    volumes:
+      # keysets.json plus the key files it references, e.g.
+      #   "keyFile": "/app/config/keys-cmv1.json"
+      # or, without a keysets.json (legacy single-set mode), just keys.json.
+      # A directory (not single-file) mount, so edits made on the host -
+      # including editors that replace the file - reach the next run
+      # without a restart.
+      - ./config:/app/config:ro
+      # Written by the container user (uid 1000):
+      #   mkdir -p results logs && sudo chown 1000:1000 results logs
+      - ./results:/app/results
+      - ./logs:/app/logs
+
+    # Or run as the host user that owns ./results and ./logs instead of
+    # chowning them (`id -u`:`id -g`).
+    # user: "1000:1000"

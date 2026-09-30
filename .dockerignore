@@ -1,0 +1,16 @@
+node_modules
+dist
+results
+logs
+config
+.env
+.env.*
+!.env.example
+keys*.json
+keysets.json
+*.log
+.git
+.github
+Dockerfile
+docker-compose.yml
+.dockerignore

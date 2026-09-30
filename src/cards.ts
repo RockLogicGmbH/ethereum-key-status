@@ -1,40 +1,64 @@
-// cards.js - builds the Adaptive Cards posted to Teams.
-const { IN_DEPOSIT_QUEUE, NOT_DEPOSITED, UNKNOWN } = require('./status');
+// cards.ts - builds the Adaptive Cards posted to Teams.
+import { IN_DEPOSIT_QUEUE, NOT_DEPOSITED, UNKNOWN } from './status.js';
+import type { CardElement, CardSection, Fact, Frontiers, KeyReport, KeySetType, Report, TeamsMessage } from './types.js';
 
 // Teams Workflows answers 202 the moment it receives the POST, before it
 // tries to render the card, so an oversized payload is accepted and then
 // dropped without any error reaching us. The documented ceiling is ~28 KB;
 // stay well under it, and cap the row count too - long FactSets fail to
 // render before they hit any byte limit.
-const DEFAULT_MAX_CARD_BYTES = 16000;
-const DEFAULT_MAX_FACTS_PER_CARD = 100;
+export const DEFAULT_MAX_CARD_BYTES = 16000;
+export const DEFAULT_MAX_FACTS_PER_CARD = 100;
 // Keys shown either side of a frontier.
-const DEFAULT_FRONTIER_WINDOW = 2;
+export const DEFAULT_FRONTIER_WINDOW = 2;
 const COMPOUNDING_CREDENTIALS = '0x02';
 
-function formatEth(eth) {
+export interface CardOptions {
+    maxBytes?: number;
+    maxFacts?: number;
+    frontierWindow?: number;
+}
+
+// What the card builders read from a report. A full Report satisfies it;
+// test-webhook passes hand-written samples that leave out what their type
+// does not show (a cmv1 sample has no frontiers or balance totals).
+export interface CardReport {
+    name: string;
+    type: KeySetType | string;
+    perKeyCard: boolean;
+    totals: Pick<Report['totals'], 'keys' | 'active'> & Partial<Report['totals']>;
+    stateCounts: Record<string, number>;
+    credentials: Record<string, number>;
+    frontiers?: Frontiers;
+    batches?: Record<string, number>;
+    keys: KeyReport[];
+}
+
+export function formatEth(eth: unknown): string {
     return `${Number(eth).toFixed(2)} ETH`;
 }
 
-function shortPubkey(pubkey) {
+export function shortPubkey(pubkey: string): string {
     return pubkey.slice(0, 8);
 }
 
-function formatDuration(seconds) {
+export function formatDuration(seconds: number): string {
     if (!isFinite(seconds) || seconds <= 0) return 'now';
     if (seconds < 3600) return `${Math.round(seconds / 60)} min`;
     if (seconds < 86400) return `${Math.round(seconds / 3600)} h`;
     return `${Math.round(seconds / 86400)} d`;
 }
 
-function keyLabel(key, marked) {
+function keyLabel(key: KeyReport, marked: boolean): string {
     const index = key.genIndex !== undefined ? key.genIndex : key.position;
     return `${marked ? '=> ' : ''}#${index} ${shortPubkey(key.pubkey)}`;
 }
 
-function keyValue(key, type) {
+export function keyValue(key: KeyReport, type: string): string {
     if (key.state === IN_DEPOSIT_QUEUE) {
-        return `${formatEth(key.balanceEth)} | in queue #${key.queue.position} | ~${formatDuration(key.queue.estimatedWaitSeconds)}`;
+        // A queued key always carries its queue details (see buildKeyReport).
+        const queue = key.queue!;
+        return `${formatEth(key.balanceEth)} | in queue #${queue.position} | ~${formatDuration(queue.estimatedWaitSeconds)}`;
     }
     if (key.state === NOT_DEPOSITED) return 'not deposited';
     if (key.state === UNKNOWN) return 'no validator record';
@@ -51,12 +75,12 @@ function keyValue(key, type) {
     return value;
 }
 
-function keyFact(key, type, marked = false) {
+export function keyFact(key: KeyReport, type: string, marked = false): Fact {
     return { title: keyLabel(key, marked), value: keyValue(key, type) };
 }
 
-function summaryFacts(report) {
-    const facts = [
+export function summaryFacts(report: CardReport): Fact[] {
+    const facts: Fact[] = [
         { title: 'Keys', value: String(report.totals.keys) },
         { title: 'Active (incl. queue)', value: String(report.totals.active) }
     ];
@@ -69,7 +93,7 @@ function summaryFacts(report) {
             title: 'Avg / min / max',
             value: `${Number(report.totals.balanceAvgEth).toFixed(2)} / ${Number(report.totals.balanceMinEth).toFixed(2)} / ${Number(report.totals.balanceMaxEth).toFixed(2)} ETH`
         });
-        if (report.totals.pendingTopUpEth > 0) {
+        if (Number(report.totals.pendingTopUpEth) > 0) {
             facts.push({ title: 'Queued top-ups', value: formatEth(report.totals.pendingTopUpEth) });
         }
         const nonCompounding = Object.entries(report.credentials)
@@ -80,16 +104,17 @@ function summaryFacts(report) {
         }
     }
     if (report.batches) {
-        Object.keys(report.batches).forEach((batch) => {
-            facts.push({ title: batch, value: String(report.batches[batch]) });
+        const batches = report.batches;
+        Object.keys(batches).forEach((batch) => {
+            facts.push({ title: batch, value: String(batches[batch]) });
         });
     }
     return facts;
 }
 
 // A handful of keys either side of a boundary, with the boundary key marked.
-function windowFacts(report, from, to, marked) {
-    const facts = [];
+function windowFacts(report: CardReport, from: number, to: number, marked: number): Fact[] {
+    const facts: Fact[] = [];
     for (let i = Math.max(0, from); i <= Math.min(report.keys.length - 1, to); i++) {
         facts.push(keyFact(report.keys[i], report.type, i === marked));
     }
@@ -98,9 +123,9 @@ function windowFacts(report, from, to, marked) {
 
 // The two windows that say where things currently stand: how far down the key
 // list deposits have reached, and which key the next top-up fills.
-function frontierSections(report, window) {
+export function frontierSections(report: CardReport & { frontiers: Frontiers }, window: number): CardSection[] {
     const { lastDeposited, firstUndeposited, firstBelowCap, maxBalanceEth, hasActiveKeys } = report.frontiers;
-    const sections = [];
+    const sections: CardSection[] = [];
 
     if (lastDeposited >= 0 && firstUndeposited >= 0) {
         sections.push({
@@ -130,8 +155,8 @@ function frontierSections(report, window) {
     return sections;
 }
 
-function makeMessage(title, sections) {
-    const body = [{
+function makeMessage(title: string, sections: Array<CardSection | null | undefined>): TeamsMessage {
+    const body: CardElement[] = [{
         type: 'TextBlock',
         text: title,
         wrap: true,
@@ -163,7 +188,7 @@ function makeMessage(title, sections) {
 
 // Adaptive Card FactSet requires title/value to be strings; numeric values
 // (e.g. validator counts) otherwise fail to render in Teams.
-function getAdaptiveCard(data, title = 'Lido Key Status') {
+export function getAdaptiveCard(data: Record<string, unknown>, title = 'Lido Key Status'): TeamsMessage {
     const facts = Object.entries(data).map(([key, value]) => ({
         title: String(key),
         value: String(value)
@@ -173,7 +198,7 @@ function getAdaptiveCard(data, title = 'Lido Key Status') {
 
 // Largest number of rows that still fits the budget, found by bisection so
 // a single oversized row cannot wedge the loop.
-function fittingRowCount(title, facts, maxBytes, maxFacts) {
+function fittingRowCount(title: string, facts: Fact[], maxBytes: number, maxFacts: number): number {
     let low = 1;
     let high = Math.min(facts.length, maxFacts);
     while (low < high) {
@@ -192,14 +217,16 @@ function fittingRowCount(title, facts, maxBytes, maxFacts) {
 // available by setting "perKeyCard": true on the key set; it is then spread
 // evenly over as many cards as the size budget allows, with the summary on a
 // card of its own so it cannot be the one that grows large enough to drop.
-function buildCards(report, options = {}) {
+export function buildCards(report: CardReport, options: CardOptions = {}): TeamsMessage[] {
+    // `||` rather than `??`: a 0 (e.g. MAX_CARD_BYTES=0) means "use the
+    // default", as it always has.
     const maxBytes = options.maxBytes || DEFAULT_MAX_CARD_BYTES;
     const maxFacts = options.maxFacts || DEFAULT_MAX_FACTS_PER_CARD;
     const window = options.frontierWindow || DEFAULT_FRONTIER_WINDOW;
 
-    const sections = [{ facts: summaryFacts(report) }];
+    const sections: CardSection[] = [{ facts: summaryFacts(report) }];
     if (report.type === 'cmv2' && report.frontiers) {
-        sections.push(...frontierSections(report, window));
+        sections.push(...frontierSections({ ...report, frontiers: report.frontiers }, window));
     }
 
     if (!report.perKeyCard) {
@@ -227,17 +254,3 @@ function buildCards(report, options = {}) {
     }
     return cards;
 }
-
-module.exports = {
-    buildCards,
-    getAdaptiveCard,
-    keyFact,
-    summaryFacts,
-    frontierSections,
-    formatEth,
-    formatDuration,
-    shortPubkey,
-    DEFAULT_MAX_CARD_BYTES,
-    DEFAULT_MAX_FACTS_PER_CARD,
-    DEFAULT_FRONTIER_WINDOW
-};
